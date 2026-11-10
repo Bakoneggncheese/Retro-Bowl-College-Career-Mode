@@ -1,0 +1,36 @@
+Retro Bowl College – Project Handoff
+
+Project status
+- This workspace contains the compiled Retro Bowl College browser game, its supporting data, and a native-UI high-school career prelude.
+- The game should be served over HTTP; opening the files directly may result in missing assets or a blank page.
+- The original GameMaker project files are not included. `RetroBowl.js` is the available compiled runtime source and contains the prelude integration.
+
+Launch instructions
+1. Open a terminal in the project folder.
+2. Run: python3 -m http.server 8000
+3. Open http://localhost:8000/ in a browser.
+4. If the page does not load, make sure the local server is still running and that the browser is pointed to the correct URL.
+
+High-school player career
+- On a new Player career, the native details screen is used for player creation before the season; Coach selection is unchanged.
+- Pressing Continue starts six native GameMaker high-school games. Each game has three drives and repeatable Pass/Run choices on each play, with downs, touchdowns, scores, and a season record.
+- After week six, two offers are selected from the game's college team list. Accepting one continues the native QB career with that college team.
+- **Existing Saves** returns through the native details back action. It does not clear or rewrite save data.
+- Create a new save and choose Player to test the prelude again.
+
+What was cleaned up
+- Duplicate archives and screenshots were moved into the archive/ and screenshots/ folders to keep the root directory tidy.
+- The main game files remain in the project root, with html5game/ paths linking to the game assets.
+- Restored missing html5game/uph_poki.js, html5game/sound/worklets/audio-worklet.js, html5game/Editor.json, and html5game/v2/ data files from the archived package. The customized RetroBowl.js was preserved.
+
+Important files
+- index.html – main game entry file
+- RetroBowl.js – compiled game runtime, native prelude, recruiting offers, and college-team handoff
+- KeyRedirect.js – panic-button redirect helper
+- README.md – original project notes and usage description
+
+Notes
+- The source available here is the compiled GameMaker JavaScript runtime; the original `.yy`/`.gml` project is not included. Re-exporting the game would overwrite runtime changes made directly to `RetroBowl.js`.
+- This is a local browser game and does not require a build step or package install.
+- If you want to run it again later, restart the HTTP server with the same command above.
+- If a black screen returns, confirm the server is running, reload http://localhost:8000/, and check that the runtime files listed above are reachable under html5game/.

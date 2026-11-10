@@ -1,0 +1,1 @@
+/* Compatibility stub for favicon injection */

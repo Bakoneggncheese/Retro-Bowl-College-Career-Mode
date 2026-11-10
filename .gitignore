@@ -1,0 +1,5 @@
+# Local cleanup and generated artifacts
+archive/
+screenshots/
+*.bak
+*.zip
