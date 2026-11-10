@@ -21418,6 +21418,25 @@ function gml_Script_s_choose_mode_QB(_inst, _other) {
     gml_Script_slog(_inst, _other, "s_choose_mode_QB");
     var state = yyInst(_inst, _other, YYASSET_REF(0x00000062));
     var action = _inst.gmlhsCareerAction;
+    if (!action) {
+      if (yyfequal(_inst.gmltext, "Start Season")) {
+        action = "start-season";
+      } else if (yyfequal(_inst.gmltext, "Existing Saves")) {
+        action = "existing-saves";
+      } else if (yyfequal(_inst.gmltext, gml_Script_s_str(_inst, _other, "ui_Passing"))) {
+        action = "pass";
+      } else if (yyfequal(_inst.gmltext, gml_Script_s_str(_inst, _other, "ui_Running"))) {
+        action = "run";
+      } else if (state.gmlhsSeasonWeek >= 6) {
+        var firstOffer = ds_list_find_value(state.gmlteamlist, state.gmlhsOfferTeam1);
+        var secondOffer = ds_list_find_value(state.gmlteamlist, state.gmlhsOfferTeam2);
+        if (yyfequal(_inst.gmltext, ds_map_find_value(firstOffer, "name"))) {
+          action = "offer-1";
+        } else if (yyfequal(_inst.gmltext, ds_map_find_value(secondOffer, "name"))) {
+          action = "offer-2";
+        }
+      }
+    }
     if (action === "existing-saves") {
       state.gmlhsCareerPending = false;
       state.gmlhsSeasonActive = false;
