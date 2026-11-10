@@ -21436,6 +21436,16 @@ function gml_Script_s_choose_mode_QB(_inst, _other) {
           action = "offer-2";
         }
       }
+      if (!action && state.gmlhsCareerPending && !state.gmlhsCareerComplete) {
+        var clickedLeftButton = yyfless(_inst.x, yyftime(display_get_gui_width(), 0.5));
+        if (state.gmlhsSeasonActive) {
+          action = clickedLeftButton ? "pass" : "run";
+        } else if (state.gmlhsSeasonWeek >= 6) {
+          action = clickedLeftButton ? "offer-1" : "offer-2";
+        } else {
+          action = clickedLeftButton ? "start-season" : "existing-saves";
+        }
+      }
     }
     if (action === "existing-saves") {
       state.gmlhsCareerPending = false;
