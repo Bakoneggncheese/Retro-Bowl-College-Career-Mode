@@ -21320,65 +21320,201 @@ function hsShowNativeMessage(_inst, _other, title, message, leftText, rightText,
   yyInst(_inst, _other, popup.gmlinst_btn_1).gmlhsCareerAction = leftAction;
   yyInst(_inst, _other, popup.gmlinst_btn_2).gmlhsCareerAction = rightAction;
 }
-function hsShowNativeWeek(_inst, _other, state, result) {
-  var week = state.gmlhsSeasonWeek + 1;
-  var record = state.gmlhsSeasonWins + "-" + state.gmlhsSeasonLosses;
-  var message = "High School Season - Week " + week + " of 6";
-  message += "\nSeason record: " + record;
-  message += "\nScore: " + state.gmlhsWeekScore + "-" + state.gmlhsWeekOpponentScore;
-  message += "\nDrive " + (state.gmlhsDrive + 1) + " of 3";
-  if (state.gmlhsDown > 0) {
-    message += "\n" + state.gmlhsDown + (state.gmlhsDown === 1 ? "st" :
-      state.gmlhsDown === 2 ? "nd" : state.gmlhsDown === 3 ? "rd" : "th") +
-      " down, " + state.gmlhsYardsToGo + " yards to go";
-  }
-  if (result) message += "\n\n" + result;
-  hsShowNativeMessage(
-    _inst,
-    _other,
-    "High School Season",
-    message + "\n\nChoose your next play.",
-    gml_Script_s_str(_inst, _other, "ui_Passing"),
-    gml_Script_s_str(_inst, _other, "ui_Running"),
-    "pass",
-    "run"
-  );
+function hsGetOpponentName(state) {
+  var opponents = state.gmlhsSchool === "Hampshire High" ?
+    ["Lavticit Lions", "Pinewood Panthers", "Northgate Knights",
+      "Cedar Valley Wolves", "East Ridge Eagles", "Westfield Wildcats"] :
+    ["Hampshire Hawks", "Pinewood Panthers", "Northgate Knights",
+      "Cedar Valley Wolves", "East Ridge Eagles", "Westfield Wildcats"];
+  return opponents[Math.max(0, state.gmlhsSeasonWeek || 0) % opponents.length];
 }
-function hsFinishNativeDrive(_inst, _other, state, result) {
-  var opponentRoll = irandom(2);
-  var opponentPoints = opponentRoll === 2 ? 7 : opponentRoll === 1 ? 3 : 0;
-  state.gmlhsWeekOpponentScore += opponentPoints;
-  state.gmlhsSeasonOpponentScore += opponentPoints;
-  state.gmlhsDrive++;
-  state.gmlhsDown = 1;
-  state.gmlhsYardsToGo = 10;
-  state.gmlhsDriveYards = 0;
-  result += " Opponent scores " + opponentPoints + " on its drive.";
+function hsCreateSchedule(state) {
+  if (yyGetBool(ds_exists(state.gmlfixturelist, 2))) {
+    for (var fixtureIndex = 0;
+      fixtureIndex < ds_list_size(state.gmlfixturelist);
+      fixtureIndex++) {
+      var oldFixture = ds_list_find_value(state.gmlfixturelist, fixtureIndex);
+      if (yyGetBool(ds_exists(oldFixture, 1))) ds_map_destroy(oldFixture);
+    }
+    ds_list_destroy(state.gmlfixturelist);
+  }
+  state.gmlfixturelist = ds_list_create();
 
-  if (state.gmlhsDrive < 3) {
-    hsShowNativeWeek(_inst, _other, state, result);
-    return;
+  var teamCount = ds_list_size(state.gmlteamlist);
+  var schoolTeamIndex = -1;
+  for (var teamIndex = 0; teamIndex < teamCount; teamIndex++) {
+    var team = ds_list_find_value(state.gmlteamlist, teamIndex);
+    if (real(ds_map_find_value(team, "uid")) === state.gmlmyteam_id) {
+      schoolTeamIndex = teamIndex;
+      break;
+    }
+  }
+  if (teamCount < 2 || schoolTeamIndex < 0) {
+    throw new Error("The selected school team could not be added to the high-school schedule.");
   }
 
-  if (state.gmlhsWeekScore > state.gmlhsWeekOpponentScore) {
-    state.gmlhsSeasonWins++;
-  } else if (state.gmlhsWeekScore < state.gmlhsWeekOpponentScore) {
-    state.gmlhsSeasonLosses++;
+  for (var gameIndex = 0; gameIndex < 6; gameIndex++) {
+    var opponentTeamIndex = (schoolTeamIndex + gameIndex + 1) % teamCount;
+    var fixture = ds_map_create();
+    ds_map_set(fixture, "week", gameIndex + 1);
+    ds_map_set(fixture, "away_team",
+      gameIndex % 2 === 0 ? schoolTeamIndex : opponentTeamIndex);
+    ds_map_set(fixture, "home_team",
+      gameIndex % 2 === 0 ? opponentTeamIndex : schoolTeamIndex);
+    ds_map_set(fixture, "away_score", -1);
+    ds_map_set(fixture, "home_score", -1);
+    ds_map_set(fixture, "human_win", "unplayed");
+    ds_list_add(state.gmlfixturelist, fixture);
   }
-  var weekResult = "Week " + (state.gmlhsSeasonWeek + 1) + " final: " +
-    state.gmlhsWeekScore + "-" + state.gmlhsWeekOpponentScore + ".";
-  state.gmlhsSeasonWeek++;
-  if (state.gmlhsSeasonWeek < 6) {
-    state.gmlhsDrive = 0;
-    state.gmlhsDown = 1;
-    state.gmlhsYardsToGo = 10;
-    state.gmlhsDriveYards = 0;
-    state.gmlhsWeekScore = 0;
-    state.gmlhsWeekOpponentScore = 0;
-    hsShowNativeWeek(_inst, _other, state, weekResult);
-  } else {
-    hsShowNativeOffers(_inst, _other, state);
+}
+function hsFindNextGameWeek(_inst, _other, state) {
+  if (state.gmlhsCareerPending &&
+      ds_list_size(state.gmlfixturelist) === 0) {
+    hsCreateSchedule(state);
   }
+  var currentWeek = Math.max(1, state.gmlweek);
+  for (var fixtureIndex = 0; fixtureIndex < ds_list_size(state.gmlfixturelist); fixtureIndex++) {
+    var fixture = ds_list_find_value(state.gmlfixturelist, fixtureIndex);
+    if (!fixture || !ds_exists(fixture, 1)) continue;
+    var fixtureWeek = real(ds_map_find_value(fixture, "week"));
+    if (fixtureWeek >= currentWeek &&
+        fixtureWeek <= 6 &&
+        ds_map_find_value(fixture, "human_win") === "unplayed") {
+      return fixtureWeek;
+    }
+  }
+  if (state.gmlhsCareerPending && state.gmlhsLiveMatchPending &&
+      state.gmlhsSeasonWeek === 0) {
+    hsCreateSchedule(state);
+    for (var retryIndex = 0; retryIndex < ds_list_size(state.gmlfixturelist); retryIndex++) {
+      var retryFixture = ds_list_find_value(state.gmlfixturelist, retryIndex);
+      if (!retryFixture || !ds_exists(retryFixture, 1)) continue;
+      var retryWeek = real(ds_map_find_value(retryFixture, "week"));
+      if (retryWeek >= currentWeek && retryWeek <= 6 &&
+          ds_map_find_value(retryFixture, "human_win") === "unplayed") {
+        return retryWeek;
+      }
+    }
+  }
+  throw new Error("No remaining regular-season fixture is available for the high-school career.");
+}
+function hsAdvanceToGameWeek(_inst, _other, state, targetWeek) {
+  if (targetWeek < state.gmlweek ||
+      targetWeek > 6) {
+    throw new Error("The high-school schedule could not advance to its next playable game.");
+  }
+  state.gmlweek = targetWeek;
+}
+function hsApplyPlayerButtonPalette(_inst, _other, state) {
+  if (!state.gmlhsCareerPending) return;
+  global.gmlc_background = make_color_rgb(5, 50, 110);
+  global.gmlc_primary = gml_Script_s_get_college_primary_col(_inst, _other);
+  global.gmlc_buttons = global.gmlc_primary;
+  var buttons = GetWithArray(YYASSET_REF(0x00000014));
+  for (var buttonId in buttons) {
+    if (!buttons.hasOwnProperty(buttonId)) continue;
+    buttons[buttonId].gmlcolour = global.gmlc_buttons;
+  }
+}
+function hsConfigureCareerHome(_inst, _other, state) {
+  if (!state.gmlhsCareerPending || !state.gmlhsSeasonActive) return;
+  yyInst(_inst, _other, 100240).gmltext = state.gmlhsSchool.toUpperCase() + " FOOTBALL";
+  yyInst(_inst, _other, 100245).gmltext =
+    "GAME " + Math.min(6, state.gmlhsSeasonWeek + 1) + " / 6";
+  yyInst(_inst, _other, 100247).gmltext =
+    (state.gmlhsWins || 0) + " - " + (state.gmlhsLosses || 0);
+  yyInst(_inst, _other, 100238).gmltext =
+    "PLAY GAME " + Math.min(6, state.gmlhsSeasonWeek + 1);
+  yyInst(_inst, _other, 100241).visible = false;
+  yyInst(_inst, _other, 100244).visible = false;
+  [100242, 100243, 100236, 100229, 100248].forEach(function (instanceId) {
+    if (yyGetBool(instance_exists(instanceId))) {
+      yyInst(_inst, _other, instanceId).visible = false;
+    }
+  });
+  if (!state.gmlhsSeasonButton ||
+      !yyGetBool(instance_exists(state.gmlhsSeasonButton))) {
+    state.gmlhsSeasonButton = gml_Script_s_create_button(
+      _inst,
+      _other,
+      240,
+      144,
+      __yy_gml_object_create(
+        _inst,
+        (_inst.gml___struct___206 = __yy_method(
+          _inst,
+          gml_Script____struct___206_gml_Object_obj_home_Create_0
+        )),
+        "SEASON",
+        kgml_Script_btn_click_League,
+        1.5
+      ),
+      YYASSET_REF(0x00000014)
+    );
+  }
+}
+function hsCollegeRatingAfterRecruiting(startRating, offerRating) {
+  var ratingLoss = startRating <= 1.5 ? 1.5 : startRating <= 2.5 ? 1 : 0.5;
+  return Math.max(0.5, Math.round((offerRating - ratingLoss) * 2) / 2);
+}
+function hsSetUniformColor(state, field, color, shadow) {
+  var channels = [
+    colour_get_blue(color),
+    colour_get_green(color),
+    colour_get_red(color)
+  ];
+  var values = state[field];
+  if (!Array.isArray(values)) values = [];
+  for (var channelIndex = 0; channelIndex < 3; channelIndex++) {
+    values[channelIndex] = channels[channelIndex] / (shadow ? 300 : 256);
+  }
+  state[field] = values;
+}
+function hsApplySchoolUniforms(_inst, _other, state, humanTeam) {
+  var navy = make_color_rgb(5, 50, 110);
+  var gold = make_color_rgb(181, 158, 101);
+  var white = make_color_rgb(248, 246, 238);
+  var homeIsSchool = humanTeam === 1;
+  var kits = [
+    { suffix: "home", school: homeIsSchool },
+    { suffix: "away", school: !homeIsSchool }
+  ];
+  var fields = ["helmet", "logo", "shirt", "sleeve", "pants", "stripe", "socks1", "socks2"];
+  for (var kitIndex = 0; kitIndex < kits.length; kitIndex++) {
+    var kit = kits[kitIndex];
+    for (var fieldIndex = 0; fieldIndex < fields.length; fieldIndex++) {
+      var field = fields[fieldIndex];
+      var color = kit.school ?
+        (field === "logo" || field === "sleeve" || field === "pants" ||
+          field === "stripe" ? gold : navy) :
+        (field === "helmet" || field === "shirt" || field === "pants" ||
+          field === "socks1" || field === "socks2" ? white : navy);
+      hsSetUniformColor(state, "gmlcol_" + field + "_" + kit.suffix, color,
+        field === "sleeve" || field === "pants");
+    }
+    hsSetUniformColor(state, "gmlcol_pants_" + kit.suffix + "_b",
+      kit.school ? gold : white, true);
+    hsSetUniformColor(state, "gmlcol_endzone_" + kit.suffix,
+      kit.school ? gold : navy, false);
+  }
+}
+function hsCreateMatchTeam(team, name, tla) {
+  var matchTeam = ds_map_create();
+  ds_map_copy(matchTeam, team);
+  ds_map_set(matchTeam, "name", name);
+  ds_map_set(matchTeam, "tla", tla);
+  ds_map_set(matchTeam, "roof", 0);
+  return matchTeam;
+}
+function hsCopyUniformColorsToPreview(state, uniform, side) {
+  var suffix = side === "home" ? "home" : "away";
+  var fields = ["helmet", "logo", "shirt", "sleeve", "pants", "stripe", "socks1", "socks2"];
+  var previewFields = ["helmet", "logo", "shirt", "sleeve", "pants", "stripe", "socks1", "socks2"];
+  for (var fieldIndex = 0; fieldIndex < fields.length; fieldIndex++) {
+    uniform["gml" + previewFields[fieldIndex]] = state["gmlcol_" + fields[fieldIndex] + "_" + suffix];
+  }
+  uniform.gmlpants_b = state["gmlcol_pants_" + suffix + "_b"];
+  uniform.gmlendzone = state["gmlcol_endzone_" + suffix];
 }
 function hsShowNativeOffers(_inst, _other, state) {
   var teamCount = ds_list_size(state.gmlteamlist);
@@ -21391,17 +21527,19 @@ function hsShowNativeOffers(_inst, _other, state) {
   state.gmlhsOfferTeam1 = firstIndex;
   state.gmlhsOfferTeam2 = secondIndex;
   state.gmlhsRecruitRating = Math.min(3, Math.max(1,
-    1 + Math.floor((state.gmlhsSeasonWins * 2 + state.gmlhsSeasonYards / 75) / 4)));
+    state.gmlhsStartRating + ((state.gmlhsWins || 0) >= 4 ? 1 : 0)));
   var firstTeam = ds_list_find_value(state.gmlteamlist, firstIndex);
   var secondTeam = ds_list_find_value(state.gmlteamlist, secondIndex);
   var firstStars = state.gmlhsRecruitRating;
   var secondStars = Math.max(1, firstStars - 1);
-  var seasonRecord = state.gmlhsSeasonWins + "-" + state.gmlhsSeasonLosses;
-  var message = "Final season record: " + seasonRecord + ". Total yards: " +
-    state.gmlhsSeasonYards + ". Recruiting grade: " + firstStars +
-    " stars.\n\n" + ds_map_find_value(firstTeam, "name") + " offers " +
-    firstStars + "-star development.\n" + ds_map_find_value(secondTeam, "name") +
-    " offers " + secondStars + "-star development.\nChoose your college.";
+  var firstCollegeRating = hsCollegeRatingAfterRecruiting(state.gmlhsStartRating, firstStars);
+  var secondCollegeRating = hsCollegeRatingAfterRecruiting(state.gmlhsStartRating, secondStars);
+  var message = "High school season complete: " + (state.gmlhsWins || 0) +
+    "-" + (state.gmlhsLosses || 0) + ".\n\n" +
+    ds_map_find_value(firstTeam, "name") + ": " + firstStars +
+    " stars (college entry " + firstCollegeRating + ").\n" +
+    ds_map_find_value(secondTeam, "name") + ": " + secondStars +
+    " stars (college entry " + secondCollegeRating + ").\nChoose a college.";
   hsShowNativeMessage(
     _inst,
     _other,
@@ -21413,104 +21551,87 @@ function hsShowNativeOffers(_inst, _other, state) {
     "offer-2"
   );
 }
+function hsSetupCharacterControls(_inst, _other) {
+  var state = yyInst(_inst, _other, YYASSET_REF(0x00000062));
+  if (!state.gmlhsCareerPending || state.gmlhsCareerComplete) return;
+
+  hsApplyPlayerButtonPalette(_inst, _other, state);
+  state.gmlhsSchool = state.gmlhsSchool || "Hampshire High";
+  state.gmlhsPlayerPosition = state.gmlhsPlayerPosition || "QB";
+  state.gmlhsStartRating = state.gmlhsStartRating || 1;
+  if (yyGetBool(instance_exists(100038))) yyInst(_inst, _other, 100038).visible = false;
+
+  var panels = GetWithArray(YYASSET_REF(0x0000001d));
+  for (var panelId in panels) {
+    if (!panels.hasOwnProperty(panelId)) continue;
+    var panel = panels[panelId];
+    if (!Array.isArray(panel.gml_col) || panel.gml_col.length < 3) continue;
+
+    var labels = ["SCHOOL", "POSITION", "STARS"];
+    var values = [
+      state.gmlhsSchool === "Hampshire High" ? "HAMPSHIRE" : "LAVTICIT",
+      state.gmlhsPlayerPosition,
+      ""
+    ];
+    var actions = [
+      kgml_Script_s_college_details_starting_btn_action,
+      kgml_Script_s_college_details_difficulty_btn_action,
+      kgml_Script_s_college_details_favorite_btn_action
+    ];
+    for (var columnIndex = 0; columnIndex < 3; columnIndex++) {
+      var column = panel.gml_col[columnIndex];
+      column.gmltitle = labels[columnIndex];
+      column.gmltext = values[columnIndex];
+      column.gmlcolor = global.gmlc_primary;
+      var buttonId = column.gmlbtn_inst;
+      if (!yyGetBool(instance_exists(buttonId))) continue;
+      var button = yyInst(_inst, _other, buttonId);
+      var control = ["school", "position", "rating"][columnIndex];
+      button.gmlhsCareerControl = control;
+      button.gmlonClickAction = actions[columnIndex];
+      column.gmlbtn_action = actions[columnIndex];
+      var labelId = column.gmlbtn_label;
+      if (yyGetBool(instance_exists(labelId))) {
+        var label = yyInst(_inst, _other, labelId);
+        label.gmlhsCareerControl = control;
+        label.gmlaction_tap = actions[columnIndex];
+      }
+    }
+  }
+}
 function gml_Script_s_choose_mode_QB(_inst, _other) {
   {
     gml_Script_slog(_inst, _other, "s_choose_mode_QB");
     var state = yyInst(_inst, _other, YYASSET_REF(0x00000062));
     var action = _inst.gmlhsCareerAction;
-    if (!action) {
-      if (yyfequal(_inst.gmltext, "Start Season")) {
-        action = "start-season";
-      } else if (yyfequal(_inst.gmltext, "Existing Saves")) {
-        action = "existing-saves";
-      } else if (yyfequal(_inst.gmltext, gml_Script_s_str(_inst, _other, "ui_Passing"))) {
-        action = "pass";
-      } else if (yyfequal(_inst.gmltext, gml_Script_s_str(_inst, _other, "ui_Running"))) {
-        action = "run";
-      } else if (state.gmlhsSeasonWeek >= 6) {
-        var firstOffer = ds_list_find_value(state.gmlteamlist, state.gmlhsOfferTeam1);
-        var secondOffer = ds_list_find_value(state.gmlteamlist, state.gmlhsOfferTeam2);
-        if (yyfequal(_inst.gmltext, ds_map_find_value(firstOffer, "name"))) {
-          action = "offer-1";
-        } else if (yyfequal(_inst.gmltext, ds_map_find_value(secondOffer, "name"))) {
-          action = "offer-2";
-        }
-      }
-      if (!action && state.gmlhsCareerPending && !state.gmlhsCareerComplete) {
-        var clickedLeftButton = yyfless(_inst.x, yyftime(display_get_gui_width(), 0.5));
-        if (state.gmlhsSeasonActive) {
-          action = clickedLeftButton ? "pass" : "run";
-        } else if (state.gmlhsSeasonWeek >= 6) {
-          action = clickedLeftButton ? "offer-1" : "offer-2";
-        } else {
-          action = clickedLeftButton ? "start-season" : "existing-saves";
-        }
-      }
-    }
-    if (action === "existing-saves") {
-      state.gmlhsCareerPending = false;
-      state.gmlhsSeasonActive = false;
+    if (action === "hs-schedule-close") {
+      state.gmlhsLiveMatchPending =
+        state.gmlhsCareerPending && state.gmlhsSeasonActive;
       gml_Script_s_msg_clear(_inst, _other);
-      gml_Script_btn_click_Details_Back(_inst, _other);
+      room_goto(YYASSET_REF(0x0300000e));
       return;
     }
-    if (action === "start-season") {
+    if (action === "hs-next-game") {
+      state.gmlhsLiveMatchPending = true;
+      state.gmlstage = 1;
       gml_Script_s_msg_clear(_inst, _other);
-      state.gmlhsCareerPending = true;
-      state.gmlhsSeasonActive = true;
-      state.gmlhsSeasonWeek = 0;
-      state.gmlhsSeasonWins = 0;
-      state.gmlhsSeasonLosses = 0;
-      state.gmlhsSeasonYards = 0;
-      state.gmlhsSeasonScore = 0;
-      state.gmlhsSeasonOpponentScore = 0;
-      state.gmlhsWeekScore = 0;
-      state.gmlhsWeekOpponentScore = 0;
-      state.gmlhsDrive = 0;
-      state.gmlhsDown = 1;
-      state.gmlhsYardsToGo = 10;
-      state.gmlhsDriveYards = 0;
-      hsShowNativeWeek(_inst, _other, state, "");
-      return;
-    }
-    if (action === "pass" || action === "run") {
-      gml_Script_s_msg_clear(_inst, _other);
-      var yards = action === "pass" ? 3 + irandom(20) : 2 + irandom(13);
-      if (action === "pass" && irandom(99) < 32) yards = 0;
-      var touchdown = yards > 0 && yards >= 60 - state.gmlhsDriveYards;
-      state.gmlhsSeasonYards += yards;
-      state.gmlhsDriveYards += yards;
-      var result = (action === "pass" ? "Pass" : "Run") + " gained " +
-        yards + " yards.";
-      if (touchdown) {
-        state.gmlhsWeekScore += 7;
-        state.gmlhsSeasonScore += 7;
-        result += " Touchdown!";
-        hsFinishNativeDrive(_inst, _other, state, result);
-      } else {
-        state.gmlhsYardsToGo -= yards;
-        if (state.gmlhsYardsToGo <= 0) {
-          state.gmlhsDown = 1;
-          state.gmlhsYardsToGo = Math.min(10, 60 - state.gmlhsDriveYards);
-          result += " First down!";
-        } else {
-          state.gmlhsDown++;
-        }
-        if (state.gmlhsDown > 4) {
-          result += " Turnover on downs.";
-          hsFinishNativeDrive(_inst, _other, state, result);
-        } else {
-          hsShowNativeWeek(_inst, _other, state, result);
-        }
-      }
+      gml_Script_btn_click_Play1(_inst, _other);
       return;
     }
     if (action === "offer-1" || action === "offer-2") {
+      var selectedOfferRating = action === "offer-1" ?
+        state.gmlhsRecruitRating : Math.max(1, state.gmlhsRecruitRating - 1);
+      state.gmlhsCollegeStarRating = hsCollegeRatingAfterRecruiting(
+        state.gmlhsStartRating,
+        selectedOfferRating
+      );
       state.gmlhsOfferTeamIndex = action === "offer-1" ?
         state.gmlhsOfferTeam1 : state.gmlhsOfferTeam2;
       state.gmlhsSeasonActive = false;
       state.gmlhsCareerPending = false;
       state.gmlhsCareerComplete = true;
+      state.gmlweek = 1;
+      state.gmlstage = 1;
       var chosenTeam = ds_list_find_value(state.gmlteamlist, state.gmlhsOfferTeamIndex);
       state.gmlmyteam = chosenTeam;
       state.gmlmyteam_id = real(ds_map_find_value(chosenTeam, "uid"));
@@ -21522,28 +21643,26 @@ function gml_Script_s_choose_mode_QB(_inst, _other) {
       yyInst(_inst, _other, 100034).gmltext =
         gml_Script_s_get_team_name_by_id(_inst, _other, state.gmlmyteam_id);
       gml_Script_s_msg_clear(_inst, _other);
+      gml_Script_s_update_game_title(_inst, _other);
       gml_Script_btn_click_Details_Continue(_inst, _other);
       return;
-    } else if (state.gmlintro > 0 && !state.gmlhsCareerPending) {
-      state.gmlhsCareerPending = true;
-      state.gmlhsCareerComplete = false;
-      state.gmlfr_mode = 0;
-      state.gmlqb_mode = 1;
-      state.gmlco_mode = 0;
-      gml_Script_s_msg_clear(_inst, _other);
-      gml_Script_s_update_ui_colours(_inst, _other);
-      gml_Script_s_update_details_screen(_inst, _other);
-      gml_Script_s_refresh_strings(_inst, _other);
-      return;
     }
-    gml_Script_s_msg_clear(_inst, _other);
+    state.gmlhsCareerPending = true;
+    state.gmlhsCareerComplete = false;
+    state.gmlhsLiveMatchPending = false;
     state.gmlfr_mode = 0;
     state.gmlqb_mode = 1;
     state.gmlco_mode = 0;
+    gml_Script_s_msg_clear(_inst, _other);
+    if (yyGetBool(instance_exists(100027))) {
+      var continueButton = yyInst(_inst, _other, 100027);
+      continueButton.gmlonClickAction = kgml_Script_btn_click_Details_Continue;
+      continueButton.gml_original_action = -4;
+    }
     gml_Script_s_update_ui_colours(_inst, _other);
-    gml_Script_s_refresh_strings(_inst, _other);
-    gml_Script_btn_click_GenerateCharacter(_inst, _other);
-    gml_Script_s_set_up_purchase_ids(_inst, _other);
+    gml_Script_s_update_details_screen(_inst, _other);
+    hsSetupCharacterControls(_inst, _other);
+    return;
   }
 }
 function gml_Script_s_choose_mode_CO_loading(_inst, _other) {
@@ -21554,6 +21673,9 @@ function gml_Script_s_choose_mode_CO_loading(_inst, _other) {
 function gml_Script_s_choose_mode_CO(_inst, _other) {
   {
     gml_Script_slog(_inst, _other, "s_choose_mode_CO");
+    var state = yyInst(_inst, _other, YYASSET_REF(0x00000062));
+    state.gmlhsCareerPending = false;
+    state.gmlhsSeasonActive = false;
     gml_Script_s_msg_clear(_inst, _other);
     gml_Script_s_setup_for_mode_CO(_inst, _other);
     gml_Script_s_regen_clean_save_mode_dependent_data(_inst, _other);
@@ -24036,18 +24158,41 @@ function gml_Script_s_college_details_bottom_panel_create_buttons(_inst, _other,
 }
 function gml_Script_s_college_details_favorite_btn_action(_inst, _other) {
   {
+    var hsState = yyInst(_inst, _other, YYASSET_REF(0x00000062));
+    if (yyGetBool(_inst.gmlhsCareerControl === "rating") &&
+        yyGetBool(hsState.gmlhsCareerPending) && !yyGetBool(hsState.gmlhsCareerComplete)) {
+      hsState.gmlhsStartRating = hsState.gmlhsStartRating >= 3 ?
+        1 : Math.round(((hsState.gmlhsStartRating || 1) + 0.5) * 2) / 2;
+      return;
+    }
     yyInst(_inst, _other, yyInst(_inst, _other, global.gmlg_m).gmlteam_selections).gmlmode = 1;
     gml_Script_btn_click_Change_Favourite(_inst, _other);
   }
 }
 function gml_Script_s_college_details_starting_btn_action(_inst, _other) {
   {
+    var hsState = yyInst(_inst, _other, YYASSET_REF(0x00000062));
+    if (yyGetBool(_inst.gmlhsCareerControl === "school") &&
+        yyGetBool(hsState.gmlhsCareerPending) && !yyGetBool(hsState.gmlhsCareerComplete)) {
+      hsState.gmlhsSchool = hsState.gmlhsSchool === "Hampshire High" ?
+        "Lavticit High" : "Hampshire High";
+      yyInst(_inst, _other, _inst.gmlcol).gmltext =
+        hsState.gmlhsSchool === "Hampshire High" ? "HAMPSHIRE" : "LAVTICIT";
+      return;
+    }
     yyInst(_inst, _other, yyInst(_inst, _other, global.gmlg_m).gmlteam_selections).gmlmode = 0;
     gml_Script_btn_click_Change_Favourite(_inst, _other);
   }
 }
 function gml_Script_s_college_details_difficulty_btn_action(_inst, _other) {
   {
+    var hsState = yyInst(_inst, _other, YYASSET_REF(0x00000062));
+    if (yyGetBool(_inst.gmlhsCareerControl === "position") &&
+        yyGetBool(hsState.gmlhsCareerPending) && !yyGetBool(hsState.gmlhsCareerComplete)) {
+      hsState.gmlhsPlayerPosition = hsState.gmlhsPlayerPosition === "QB" ? "RB" : "QB";
+      yyInst(_inst, _other, _inst.gmlcol).gmltext = hsState.gmlhsPlayerPosition;
+      return;
+    }
     {
       var __yy__v51 = GetWithArray(YYASSET_REF(0x00000062));
       for (var __yy__v52 in __yy__v51) {
@@ -24084,7 +24229,17 @@ function gml_Script_s_college_details_btn_draw(_inst, _other) {
     draw_sprite_ext(_inst, _inst.sprite_index, _inst.image_index, _inst.x, _inst.y, _inst.image_xscale, _inst.image_yscale, 0, 16777215, 1);
     draw_set_font(global.gmlfnt_small_flex);
     draw_set_halign(1);
-    gml_Script_draw_hd_text_color(_inst, _other, yyInst(_inst, _other, _inst.gmlcol).x, yyfplus(__yy_gml_errCheck(_inst.y), __yy_gml_errCheck(yyfdivide(__yy_gml_errCheck(_inst.sprite_height), 2))), yyInst(_inst, _other, _inst.gmlcol).gmltext, yyInst(_inst, _other, _inst.gmlcol).gmlcolor, yyInst(_inst, _other, _inst.gmlcol).gmlcolor, yyInst(_inst, _other, _inst.gmlcol).gmlcolor, yyInst(_inst, _other, _inst.gmlcol).gmlcolor, 1);
+    var column = yyInst(_inst, _other, _inst.gmlcol);
+    var hsState = yyInst(_inst, _other, YYASSET_REF(0x00000062));
+    var centerY = yyfplus(__yy_gml_errCheck(_inst.y), __yy_gml_errCheck(yyfdivide(__yy_gml_errCheck(_inst.sprite_height), 2)));
+    if (column.gmltitle === "STARS" && yyGetBool(hsState.gmlhsCareerPending) &&
+        !yyGetBool(hsState.gmlhsCareerComplete)) {
+      draw_sprite_ext(_inst, YYASSET_REF(0x01000076),
+        Math.round(Number(hsState.gmlhsStartRating || 1) * 2),
+        column.x, centerY, 1, 1, 0, global.gmlc_primary, 1);
+    } else {
+      gml_Script_draw_hd_text_color(_inst, _other, column.x, centerY, column.gmltext, column.gmlcolor, column.gmlcolor, column.gmlcolor, column.gmlcolor, 1);
+    }
   }
 }
 function gml_Script_s_create_starting_teams_list(_inst, _other) {
@@ -33057,6 +33212,10 @@ function gml_Script_s_get_subdiv_name(_inst, _other, argument0) {
 }
 function gml_Script_s_joboffers_string(_inst, _other, argument0) {
   {
+    var hsState = yyInst(_inst, _other, YYASSET_REF(0x00000062));
+    if (yyGetBool(hsState.gmlhsCareerPending) && !yyGetBool(hsState.gmlhsCareerComplete)) {
+      return "";
+    }
     var ___sw290___ = argument0;
     var ___swc291___ = -1;
     if (yyCompareVal(___sw290___, 0, g_GMLMathEpsilon, false) == 0) {
@@ -33887,17 +34046,58 @@ function gml_Script_btn_click_Details_Continue(_inst, _other) {
   {
     var hsState = yyInst(_inst, _other, YYASSET_REF(0x00000062));
     if (hsState.gmlhsCareerPending && !hsState.gmlhsCareerComplete) {
-      gml_Script_s_msg_clear(_inst, _other);
-      hsShowNativeMessage(
-        _inst,
-        _other,
-        "High School Season",
-        "Your player is ready. Play six high-school games to earn college offers.",
-        "Start Season",
-        "Existing Saves",
-        "start-season",
-        "existing-saves"
-      );
+      hsState.gmlhsSchool = hsState.gmlhsSchool || "Hampshire High";
+      hsState.gmlhsPlayerPosition = hsState.gmlhsPlayerPosition || "QB";
+      hsState.gmlhsStartRating = hsState.gmlhsStartRating || 1;
+      hsState.gmlintro = 0;
+      hsState.gmlhsSeasonActive = true;
+      hsState.gmlhsSeasonWeek = 0;
+      hsState.gmlhsWins = 0;
+      hsState.gmlhsLosses = 0;
+      hsState.gmlweek = 1;
+      hsState.gmlstage = 1;
+      hsState.gmlhsCareerSetupComplete = true;
+      hsState.gmlhsLiveMatchPending = true;
+
+      hsState.gmlfname = yyInst(_inst, _other, 100025).gmltext ||
+        gml_Script_s_get_random_first_name(hsState, _inst, true);
+      hsState.gmllname = yyInst(_inst, _other, 100026).gmltext ||
+        gml_Script_s_get_random_last_name(hsState, _inst);
+      hsState.gmlmyteam_id = real(ds_map_find_value(hsState.gmlmyteam, "uid"));
+      hsState.gmlfavourite_team_id = hsState.gmlmyteam_id;
+      hsState.gmlmyconference = real(ds_map_find_value(hsState.gmlmyteam, "conference"));
+      hsState.gmlmydivision = real(ds_map_find_value(hsState.gmlmyteam, "division"));
+
+      gml_Script_s_set_team_morale(hsState, _inst, 60, 90);
+      hsCreateSchedule(hsState);
+
+      for (var playerIndex = 0;
+        playerIndex < ds_list_size(hsState.gmlroster);
+        playerIndex++) {
+        var playerMap = ds_list_find_value(hsState.gmlroster, playerIndex);
+        ds_map_set(playerMap, "teamid", hsState.gmlmyteam_id);
+        ds_map_set(playerMap, "condition", irandom_range(80, 100));
+      }
+      var hasQuarterback = false;
+      for (var rosterIndex = 0;
+        rosterIndex < ds_list_size(hsState.gmlroster);
+        rosterIndex++) {
+        var rosterPlayer = ds_list_find_value(hsState.gmlroster, rosterIndex);
+        if (yyGetBool(ds_exists(rosterPlayer, 1)) &&
+            yyfequal(ds_map_find_value(rosterPlayer, "position"), 1)) {
+          hasQuarterback = true;
+          break;
+        }
+      }
+      if (!hasQuarterback) {
+        var quarterback = gml_Script_s_create_player(hsState, _inst, 1, 0, 2, 4);
+        ds_map_set(quarterback, "signed_year", -1);
+        ds_map_set(quarterback, "teamid", hsState.gmlmyteam_id);
+        ds_list_add(hsState.gmlroster, quarterback);
+      }
+      gml_Script_s_set_up_qb_pmap(hsState, _inst);
+      hsState.gmlweek = hsFindNextGameWeek(_inst, _other, hsState);
+      gml_Script_s_co_pre_match(_inst, _other);
       return;
     }
     gml_Script_slog(_inst, _other, "btn_click_Details_Continue");
@@ -33949,23 +34149,28 @@ function gml_Script_btn_click_Details_Continue(_inst, _other) {
               }
               if (yyGetBool(gml_Script_s_is_co_mode(__yy__v365, _inst))) {
                 {
-                  __yy__v365.gmlfavourite_team_id = yyInst(_inst, _other, yyInst(_inst, _other, global.gmlg_m).gmlteam_selections).gmlfavorite_team_id;
-                  __yy__v365.gmlmyteam_id = yyInst(_inst, _other, yyInst(_inst, _other, global.gmlg_m).gmlteam_selections).gmlstarting_team_id;
-                  __yy__v365.gmlmyteam = gml_Script_s_get_team_by_id(__yy__v365, _inst, __yy__v365.gmlmyteam_id);
-                  __yy__v365.gmlmyconference = real(ds_map_find_value(__yy__v365.gmlmyteam, "conference"));
-                  __yy__v365.gmlmydivision = real(ds_map_find_value(__yy__v365.gmlmyteam, "division"));
-                  gml_Script_slogf(__yy__v365, _inst, "my team: %1 conf: %2", __yy__v365.gmlmyteam_id, __yy__v365.gmlmyconference);
-                  var gmli = 0;
-                  for (; yyfless(gmli, ds_list_size(__yy__v365.gmlroster)); g_yyPrePostObject__ = gmli, gmli = g_yyPrePostObject__ instanceof Long ? gmli.add(1) : ++gmli, g_yyPrePostObject__) {
-                    {
-                      var gmlpmap = ds_list_find_value(__yy__v365.gmlroster, gmli);
-                      ds_map_set(gmlpmap, "teamid", __yy__v365.gmlmyteam_id);
-                      gml_Script_s_college_correct_new_player(__yy__v365, _inst, gmlpmap);
+                  if (!(__yy__v365.gmlhsCareerSetupComplete &&
+                        __yy__v365.gmlhsCareerPending)) {
+                    __yy__v365.gmlfavourite_team_id = yyInst(_inst, _other, yyInst(_inst, _other, global.gmlg_m).gmlteam_selections).gmlfavorite_team_id;
+                    __yy__v365.gmlmyteam_id = yyInst(_inst, _other, yyInst(_inst, _other, global.gmlg_m).gmlteam_selections).gmlstarting_team_id;
+                    __yy__v365.gmlmyteam = gml_Script_s_get_team_by_id(__yy__v365, _inst, __yy__v365.gmlmyteam_id);
+                    __yy__v365.gmlmyconference = real(ds_map_find_value(__yy__v365.gmlmyteam, "conference"));
+                    __yy__v365.gmlmydivision = real(ds_map_find_value(__yy__v365.gmlmyteam, "division"));
+                    gml_Script_slogf(__yy__v365, _inst, "my team: %1 conf: %2", __yy__v365.gmlmyteam_id, __yy__v365.gmlmyconference);
+                    var gmli = 0;
+                    for (; yyfless(gmli, ds_list_size(__yy__v365.gmlroster)); g_yyPrePostObject__ = gmli, gmli = g_yyPrePostObject__ instanceof Long ? gmli.add(1) : ++gmli, g_yyPrePostObject__) {
+                      {
+                        var gmlpmap = ds_list_find_value(__yy__v365.gmlroster, gmli);
+                        ds_map_set(gmlpmap, "teamid", __yy__v365.gmlmyteam_id);
+                        gml_Script_s_college_correct_new_player(__yy__v365, _inst, gmlpmap);
+                      }
                     }
                   }
                 }
               }
-              if (!yyGetBool(gml_Script_s_is_co_mode(__yy__v365, _inst))) {
+              if (!yyGetBool(gml_Script_s_is_co_mode(__yy__v365, _inst)) &&
+                  !(__yy__v365.gmlhsCareerSetupComplete &&
+                    __yy__v365.gmlhsCareerPending)) {
                 {
                   gml_Script_slog(__yy__v365, _inst, "Choosing random team!");
                   var gmlsorted_teams = ds_list_create();
@@ -34019,39 +34224,45 @@ function gml_Script_btn_click_Details_Continue(_inst, _other) {
               ds_map_set(gmlpmap, "condition", irandom_range(80, 100));
             }
           }
-          var gmlweeks_rem = 1;
-          var gmlmsg = gml_Script_s_str(__yy__v365, _inst, "news_NewCareer");
-          if (yyGetBool(yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlqb_mode)) {
-            {
-              gmlmsg = gml_Script_s_str(__yy__v365, _inst, "news_NewCareerQB");
-              gmlmsg = string_replace_all(gmlmsg, "$teamname", gml_Script_s_get_team_name_by_id(__yy__v365, _inst, __yy__v365.gmlmyteam_id));
-              var gmlpick = irandom(95);
-              var gmlrnd = floor(yyfdivide(__yy_gml_errCheck(gmlpick), 32));
-              gmlmsg = string_replace(gmlmsg, "$playername", yyfplus(yyfplus(__yy_gml_errCheck(__yy__v365.gmlfname), " "), __yy_gml_errCheck(__yy__v365.gmllname)));
-              gmlmsg = string_replace(gmlmsg, "$coachname", yyfplus(yyfplus(__yy_gml_errCheck(__yy__v365.gmlfname_coach), " "), __yy_gml_errCheck(__yy__v365.gmllname_coach)));
-              gmlmsg = string_replace(gmlmsg, "$num", string(yyfplus(__yy_gml_errCheck(gmlpick), 1)));
-              gmlmsg = string_replace(gmlmsg, "$round", string(yyfplus(__yy_gml_errCheck(gmlrnd), 1)));
-              gml_Script_s_set_up_qb_pmap(__yy__v365, _inst);
-            }
+          if (__yy__v365.gmlhsCareerSetupComplete &&
+              __yy__v365.gmlhsCareerPending) {
+            gml_Script_s_set_up_qb_pmap(__yy__v365, _inst);
           } else {
-            {
-              gmlmsg = string_replace_all(gmlmsg, "$teamname", gml_Script_s_get_team_name_by_id(__yy__v365, _inst, __yy__v365.gmlmyteam_id));
-              gmlmsg = string_replace(gmlmsg, "$coachname", yyfplus(yyfplus(__yy_gml_errCheck(__yy__v365.gmlfname), " "), __yy_gml_errCheck(__yy__v365.gmllname)));
-              gmlmsg = string_replace(gmlmsg, "$num", string(gmlweeks_rem));
+            var gmlweeks_rem = 1;
+            var gmlmsg = gml_Script_s_str(__yy__v365, _inst, "news_NewCareer");
+            if (yyGetBool(__yy__v365.gmlqb_mode)) {
+              {
+                gmlmsg = gml_Script_s_str(__yy__v365, _inst, "news_NewCareerQB");
+                gmlmsg = string_replace_all(gmlmsg, "$teamname", gml_Script_s_get_team_name_by_id(__yy__v365, _inst, __yy__v365.gmlmyteam_id));
+                var gmlpick = irandom(95);
+                var gmlrnd = floor(yyfdivide(__yy_gml_errCheck(gmlpick), 32));
+                gmlmsg = string_replace(gmlmsg, "$playername", yyfplus(yyfplus(__yy_gml_errCheck(__yy__v365.gmlfname), " "), __yy_gml_errCheck(__yy__v365.gmllname)));
+                gmlmsg = string_replace(gmlmsg, "$coachname", yyfplus(yyfplus(__yy_gml_errCheck(__yy__v365.gmlfname_coach), " "), __yy_gml_errCheck(__yy__v365.gmllname_coach)));
+                gmlmsg = string_replace(gmlmsg, "$num", string(yyfplus(__yy_gml_errCheck(gmlpick), 1)));
+                gmlmsg = string_replace(gmlmsg, "$round", string(yyfplus(__yy_gml_errCheck(gmlrnd), 1)));
+                gml_Script_s_set_up_qb_pmap(__yy__v365, _inst);
+              }
+            } else {
+              {
+                gmlmsg = string_replace_all(gmlmsg, "$teamname", gml_Script_s_get_team_name_by_id(__yy__v365, _inst, __yy__v365.gmlmyteam_id));
+                gmlmsg = string_replace(gmlmsg, "$coachname", yyfplus(yyfplus(__yy_gml_errCheck(__yy__v365.gmlfname), " "), __yy_gml_errCheck(__yy__v365.gmllname)));
+                gmlmsg = string_replace(gmlmsg, "$num", string(gmlweeks_rem));
+              }
             }
+            if (yyfgreater(gmlweeks_rem, 1)) {
+              gmlmsg = string_replace(gmlmsg, "$weeks", string_lower(gml_Script_s_str(__yy__v365, _inst, "ui_Weeks")));
+            } else {
+              gmlmsg = string_replace(gmlmsg, "$weeks", string_lower(gml_Script_s_str(__yy__v365, _inst, "ui_Week")));
+            }
+            gmlmsg = string_replace(gmlmsg, "$lname", __yy__v365.gmllname);
+            gmlmsg = string_replace(gmlmsg, "$randomcollegename", gml_Script_s_get_random_college_name(__yy__v365, _inst));
+            gml_Script_s_add_news(__yy__v365, _inst, gmlmsg);
           }
-          if (yyfgreater(gmlweeks_rem, 1)) {
-            gmlmsg = string_replace(gmlmsg, "$weeks", string_lower(gml_Script_s_str(__yy__v365, _inst, "ui_Weeks")));
-          } else {
-            gmlmsg = string_replace(gmlmsg, "$weeks", string_lower(gml_Script_s_str(__yy__v365, _inst, "ui_Week")));
-          }
-          gmlmsg = string_replace(gmlmsg, "$lname", __yy__v365.gmllname);
-          gmlmsg = string_replace(gmlmsg, "$randomcollegename", gml_Script_s_get_random_college_name(__yy__v365, _inst));
-          gml_Script_s_add_news(__yy__v365, _inst, gmlmsg);
         }
       }
     }
-    if (yyGetBool(gml_Script_s_is_co_mode(_inst, _other))) {
+    if (yyGetBool(gml_Script_s_is_co_mode(_inst, _other)) &&
+        !(hsState.gmlhsCareerSetupComplete && hsState.gmlhsCareerPending)) {
       {
         gml_Script_s_refresh_strings(_inst, _other);
       }
@@ -34159,6 +34370,16 @@ function gml_Script_btn_click_Home(_inst, _other) {
 }
 function gml_Script_btn_click_Play1(_inst, _other) {
   {
+    var hsState = yyInst(_inst, _other, YYASSET_REF(0x00000062));
+    if (hsState.gmlhsCareerPending && hsState.gmlhsSeasonActive &&
+        hsState.gmlhsLiveMatchPending) {
+      hsAdvanceToGameWeek(
+        _inst,
+        _other,
+        hsState,
+        hsFindNextGameWeek(_inst, _other, hsState)
+      );
+    }
     gml_Script_slog(_inst, _other, "btn_click_Play1");
     gml_Script_s_stop_brass_loop(_inst, _other);
     gml_Script_s_play(_inst, _other, 1);
@@ -34220,6 +34441,25 @@ function gml_Script____struct___107_btn_click_League_gml_GlobalScript_btn_click_
 }
 function gml_Script_btn_click_League(_inst, _other) {
   {
+    var hsState = yyInst(_inst, _other, YYASSET_REF(0x00000062));
+    if (hsState.gmlhsCareerPending && hsState.gmlhsSeasonActive) {
+      var gameNumber = Math.min(6, hsState.gmlhsSeasonWeek + 1);
+      var schoolName = hsState.gmlhsSchool === "Hampshire High" ?
+        "Hampshire Hawks" : "Lavticit Lions";
+      hsShowNativeMessage(
+        _inst,
+        _other,
+        "HIGH SCHOOL SEASON",
+        schoolName + "  " + (hsState.gmlhsWins || 0) + "-" +
+          (hsState.gmlhsLosses || 0) + "\n\nGAME " + gameNumber +
+          " OF 6\nNEXT OPPONENT: " + hsGetOpponentName(hsState),
+        "BACK",
+        "PLAY GAME " + gameNumber,
+        "hs-schedule-close",
+        "hs-next-game"
+      );
+      return;
+    }
     if (yyGetBool(gml_Script_s_is_co_mode(_inst, _other))) {
       {
         gml_Script_s_goto_room(_inst, _other, YYASSET_REF(0x03000034), __yy_gml_object_create(_inst, (_inst.gml___struct___107 = __yy_method(_inst, gml_Script____struct___107_btn_click_League_gml_GlobalScript_btn_click_League)), yyfequal(g_pBuiltIn.get_current_room(), YYASSET_REF(0x0300000e)) ? 0 : 2));
@@ -40394,6 +40634,46 @@ function gml_GlobalScript_s_do_postmatch_dilemma(_inst, _other) {
 }
 function gml_Script_s_do_postmatch_dilemma(_inst, _other) {
   {
+    var hsState = yyInst(_inst, _other, YYASSET_REF(0x00000062));
+    if (hsState.gmlhsCareerPending && hsState.gmlhsLiveMatchPending) {
+      hsState.gmlhsLiveMatchPending = false;
+      var matchState = yyInst(_inst, _other, YYASSET_REF(0x00000069));
+      var humanScore = matchState.gmlteam_score[
+        __yy_gml_array_check_index(matchState.gmlhuman_team, matchState.gmlteam_score)
+      ];
+      var opponentScore = matchState.gmlteam_score[
+        __yy_gml_array_check_index(!yyGetBool(matchState.gmlhuman_team) ? 1 : 0, matchState.gmlteam_score)
+      ];
+      hsState.gmlhsMatchWon = yyfgreater(humanScore, opponentScore);
+      if (hsState.gmlhsMatchWon) {
+        hsState.gmlhsWins = (hsState.gmlhsWins || 0) + 1;
+      } else {
+        hsState.gmlhsLosses = (hsState.gmlhsLosses || 0) + 1;
+      }
+      hsState.gmlhsSeasonWeek += 1;
+      if (hsState.gmlhsSeasonWeek >= 6) {
+        hsState.gmlhsSeasonActive = false;
+        hsShowNativeOffers(_inst, _other, hsState);
+      } else {
+        hsState.gmlweek += 1;
+        var nextGameWeek = hsFindNextGameWeek(_inst, _other, hsState);
+        hsAdvanceToGameWeek(_inst, _other, hsState, nextGameWeek);
+        var nextGameNumber = hsState.gmlhsSeasonWeek + 1;
+        hsShowNativeMessage(
+          _inst,
+          _other,
+          "GAME " + hsState.gmlhsSeasonWeek + " FINAL",
+          "HIGH SCHOOL RECORD: " + hsState.gmlhsWins + "-" +
+            hsState.gmlhsLosses + "\n\nNEXT: GAME " + nextGameNumber +
+            " VS " + hsGetOpponentName(hsState),
+          "SEASON",
+          "NEXT GAME",
+          "hs-schedule-close",
+          "hs-next-game"
+        );
+      }
+      return;
+    }
     {
       var __yy__v701 = GetWithArray(YYASSET_REF(0x00000062));
       for (var __yy__v702 in __yy__v701) {
@@ -44095,6 +44375,9 @@ function gml_Script_s_create_new_save(_inst, _other) {
           gml_Script_s_create_new_stafflist(__yy__v789, _inst);
           __yy__v789.gmlcap_breach_flag = -1;
           __yy__v789.gmldo_welcome_msg = true;
+          __yy__v789.gmlhsCareerPending = false;
+          __yy__v789.gmlhsCareerComplete = false;
+          __yy__v789.gmlhsSeasonActive = false;
         }
       }
     }
@@ -44983,16 +45266,17 @@ function gml_Script_s_fix_poki_browser_max_percent_grade(_inst, _other, argument
 }
 function gml_Script_s_update_ui_colours(_inst, _other) {
   {
-    if (yyGetBool(yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlfr_mode)) {
+    var careerState = yyInst(_inst, _other, YYASSET_REF(0x00000062));
+    if (yyGetBool(careerState.gmlfr_mode)) {
       {
         global.gmlc_background = make_color_rgb(44, 104, 255);
         global.gmlc_primary = make_color_rgb(210, 210, 10);
       }
     }
-    if (yyGetBool(yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlqb_mode)) {
+    if (yyGetBool(careerState.gmlqb_mode)) {
       {
-        global.gmlc_background = make_color_rgb(128, 150, 208);
-        global.gmlc_buttons = make_color_rgb(170, 200, 255);
+        global.gmlc_background = make_color_rgb(5, 50, 110);
+        global.gmlc_primary = gml_Script_s_get_college_primary_col(_inst, _other);
       }
     }
     if (yyGetBool(gml_Script_s_is_co_mode(_inst, _other))) {
@@ -45001,12 +45285,19 @@ function gml_Script_s_update_ui_colours(_inst, _other) {
         global.gmlc_primary = gml_Script_s_get_college_primary_col(_inst, _other);
       }
     }
-    if (yyGetBool(!yyGetBool(yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlfr_mode)) && yyGetBool(!yyGetBool(yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlqb_mode)) && yyGetBool(!yyGetBool(gml_Script_s_is_co_mode(_inst, _other)))) {
-      yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlfr_mode = 1;
+    if (yyGetBool(!yyGetBool(careerState.gmlfr_mode)) &&
+        yyGetBool(!yyGetBool(careerState.gmlqb_mode)) &&
+        yyGetBool(!yyGetBool(gml_Script_s_is_co_mode(_inst, _other)))) {
+      careerState.gmlfr_mode = 1;
     }
-    gml_Script_slog(_inst, _other, yyfplus("fr_mode=", __yy_gml_errCheck(string(yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlfr_mode))));
-    gml_Script_slog(_inst, _other, yyfplus("qb_mode=", __yy_gml_errCheck(string(yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlqb_mode))));
-    gml_Script_slog(_inst, _other, yyfplus("co_mode=", __yy_gml_errCheck(string(yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlco_mode))));
+    hsApplyPlayerButtonPalette(_inst, _other, careerState);
+    if (yyGetBool(careerState.gmlhsCareerComplete &&
+        gml_Script_s_is_co_mode(_inst, _other))) {
+      global.gmlc_buttons = global.gmlc_primary;
+    }
+    gml_Script_slog(_inst, _other, yyfplus("fr_mode=", __yy_gml_errCheck(string(careerState.gmlfr_mode))));
+    gml_Script_slog(_inst, _other, yyfplus("qb_mode=", __yy_gml_errCheck(string(careerState.gmlqb_mode))));
+    gml_Script_slog(_inst, _other, yyfplus("co_mode=", __yy_gml_errCheck(string(careerState.gmlco_mode))));
     gml_Script_s_update_game_title(_inst, _other);
   }
 }
@@ -45019,10 +45310,15 @@ function gml_Script_s_update_game_title(_inst, _other) {
   {
     {
       var gmlhash = variable_get_hash("game_Title");
-      if (yyGetBool(yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlfr_mode)) {
+      var hsCareer = yyInst(_inst, _other, YYASSET_REF(0x00000062));
+      if (hsCareer.gmlhsCareerPending && !hsCareer.gmlhsCareerComplete) {
+        struct_set_from_hash(yyInst(_inst, _other, global.gmlg_m).gmllangdata, gmlhash, "HIGH SCHOOL");
+      } else if (hsCareer.gmlhsCareerComplete && yyGetBool(gml_Script_s_is_co_mode(_inst, _other))) {
+        struct_set_from_hash(yyInst(_inst, _other, global.gmlg_m).gmllangdata, gmlhash, "Retro Bowl College");
+      } else if (yyGetBool(hsCareer.gmlfr_mode)) {
         struct_set_from_hash(yyInst(_inst, _other, global.gmlg_m).gmllangdata, gmlhash, "Retro Bowl");
       } else {
-        if (yyGetBool(yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlqb_mode)) {
+        if (yyGetBool(hsCareer.gmlqb_mode)) {
           struct_set_from_hash(yyInst(_inst, _other, global.gmlg_m).gmllangdata, gmlhash, "Retro Bowl MVP");
         } else {
           if (yyGetBool(gml_Script_s_is_co_mode(_inst, _other))) {
@@ -45923,15 +46219,13 @@ function gml_Script_s_select_lang_file(_inst, _other) {
 }
 function gml_Script_s_select_override_lang_file(_inst, _other) {
   {
+    if (yyGetBool(yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlqb_mode)) {
+      return "";
+    }
     var gmlmode = "FR";
     if (yyGetBool(gml_Script_s_is_co_mode(_inst, _other))) {
       {
         gmlmode = "CO";
-      }
-    }
-    if (yyGetBool(yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlqb_mode)) {
-      {
-        gmlmode = "QB";
       }
     }
     if (yyGetBool(0) && yyGetBool(yyfequal(gmlmode, "CO"))) {
@@ -46029,7 +46323,15 @@ function gml_Script_s_load_language_file(_inst, _other, argument0, argument1) {
     if (yyGetBool(yyfequal(argument1, -4)) || yyGetBool(yyfequal(argument1, ""))) {
       return;
     }
+    if (!yyGetBool(file_exists(argument1))) {
+      gml_Script_slog(_inst, _other, yyfplus("s_load_language_file: optional file not found: ", __yy_gml_errCheck(string(argument1))));
+      return;
+    }
     var gmlfile = file_text_open_read(argument1);
+    if (yyGetBool(yyfequal(gmlfile, -1))) {
+      gml_Script_slog(_inst, _other, yyfplus("s_load_language_file: unable to open ", __yy_gml_errCheck(string(argument1))));
+      return;
+    }
     var gmlvalues, gmlvalues_count;
     while (!yyGetBool(file_text_eof(gmlfile))) {
       {
@@ -73625,6 +73927,11 @@ function gml_Script____struct___174_s_loading_start_gml_GlobalScript_s_create_me
 }
 function gml_Script_s_loading_start(_inst, _other, argument0) {
   {
+    if (yyGetBool(yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlhsCareerPending) &&
+        argument0 === kgml_Script_btn_click_Details_Continue) {
+      __yyg_call_method(argument0)(_inst, _other);
+      return;
+    }
     if (!yyGetBool(gml_Script_s_is_co_mode(_inst, _other))) {
       {
         __yyg_call_method(argument0)(_inst, _other);
@@ -82149,6 +82456,17 @@ function gml_Script_btn_click_GenerateCharacter(_inst, _other) {
         }
       }
     }
+    var hsState = yyInst(_inst, _other, YYASSET_REF(0x00000062));
+    if (hsState.gmlhsCareerPending) {
+      hsApplyPlayerButtonPalette(_inst, _other, hsState);
+      hsSetupCharacterControls(_inst, _other);
+      yyInst(_inst, _other, 100025).gmltext = hsState.gmlfname;
+      yyInst(_inst, _other, 100026).gmltext = hsState.gmllname;
+      yyInst(_inst, _other, 100036).gmlskin = hsState.gmlmy_skin;
+      yyInst(_inst, _other, 100036).gmlface_x = hsState.gmlmyface_x;
+      yyInst(_inst, _other, 100036).gmlface_y = hsState.gmlmyface_y;
+      return;
+    }
     room_goto(YYASSET_REF(0x03000002));
   }
 }
@@ -83349,6 +83667,10 @@ function gml_GlobalScript_s_get_string_week(_inst, _other, argument0) {
 }
 function gml_Script_s_get_string_week(_inst, _other, argument0) {
   {
+    var hsState = yyInst(_inst, _other, YYASSET_REF(0x00000062));
+    if (hsState.gmlhsCareerPending && hsState.gmlhsSeasonActive) {
+      return "HIGH SCHOOL - GAME " + Math.min(6, hsState.gmlhsSeasonWeek + 1);
+    }
     var gmlwk = argument0;
     if (yyfequal(gmlwk, 0)) {
       gmlwk = yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlweek;
@@ -87214,13 +87536,22 @@ function gml_Script_s_set_up_qb_pmap(_inst, _other) {
               var gmlpmap = ds_list_find_value(__yy__v1919.gmlroster, gmli);
               if (yyfequal(ds_map_find_value(gmlpmap, "position"), 1)) {
                 {
+                  if (__yy__v1919.gmlhsCareerSetupComplete &&
+                      __yy__v1919.gmlhsPlayerPosition === "RB") {
+                    continue;
+                  }
+                  var hsRating = __yy__v1919.gmlhsCareerSetupComplete ?
+                    Math.min(3, Math.max(0.5,
+                      Number(__yy__v1919.gmlhsCollegeStarRating ||
+                        __yy__v1919.gmlhsStartRating) || 1)) : 1;
+                  var hsAttribute = Math.round(hsRating * 2);
                   ds_map_set(gmlpmap, "fname", __yy__v1919.gmlfname);
                   ds_map_set(gmlpmap, "lname", __yy__v1919.gmllname);
                   ds_map_set(gmlpmap, "age", 21);
-                  ds_map_set(gmlpmap, "skill", 1);
-                  ds_map_set(gmlpmap, "speed", 1);
-                  ds_map_set(gmlpmap, "strength", 1);
-                  ds_map_set(gmlpmap, "stamina", 1);
+                  ds_map_set(gmlpmap, "skill", hsAttribute);
+                  ds_map_set(gmlpmap, "speed", hsAttribute);
+                  ds_map_set(gmlpmap, "strength", hsAttribute);
+                  ds_map_set(gmlpmap, "stamina", hsAttribute);
                   ds_map_set(gmlpmap, "max_skill", 10);
                   ds_map_set(gmlpmap, "max_speed", 10);
                   ds_map_set(gmlpmap, "max_strength", 10);
@@ -87236,6 +87567,36 @@ function gml_Script_s_set_up_qb_pmap(_inst, _other) {
                   ds_map_set(gmlpmap, "face_y", __yy__v1919.gmlmyface_y);
                   return;
                 }
+              }
+              if (__yy__v1919.gmlhsCareerSetupComplete &&
+                  __yy__v1919.gmlhsPlayerPosition === "RB" &&
+                  yyfequal(ds_map_find_value(gmlpmap, "position"), 2)) {
+                var hsRating = Math.min(3, Math.max(0.5,
+                  Number(__yy__v1919.gmlhsCollegeStarRating ||
+                    __yy__v1919.gmlhsStartRating) || 1));
+                var hsAttribute = Math.round(hsRating * 2);
+                ds_map_set(gmlpmap, "fname", __yy__v1919.gmlfname);
+                ds_map_set(gmlpmap, "lname", __yy__v1919.gmllname);
+                ds_map_set(gmlpmap, "age", 21);
+                ds_map_set(gmlpmap, "skill", hsAttribute);
+                ds_map_set(gmlpmap, "speed", hsAttribute);
+                ds_map_set(gmlpmap, "strength", hsAttribute);
+                ds_map_set(gmlpmap, "stamina", hsAttribute);
+                ds_map_set(gmlpmap, "max_skill", 10);
+                ds_map_set(gmlpmap, "max_speed", 10);
+                ds_map_set(gmlpmap, "max_strength", 10);
+                ds_map_set(gmlpmap, "max_stamina", 10);
+                ds_map_set(gmlpmap, "contract", 2);
+                ds_map_set(gmlpmap, "attitude", 50);
+                ds_map_set(gmlpmap, "salary",
+                  gml_Script_s_get_new_salary(__yy__v1919, _inst, gmlpmap));
+                ds_map_set(gmlpmap, "xp", 0);
+                ds_map_set(gmlpmap, "xp_level", 1);
+                ds_map_set(gmlpmap, "condition", 100);
+                ds_map_set(gmlpmap, "skin", __yy__v1919.gmlmy_skin);
+                ds_map_set(gmlpmap, "face_x", __yy__v1919.gmlmyface_x);
+                ds_map_set(gmlpmap, "face_y", __yy__v1919.gmlmyface_y);
+                return;
               }
             }
           }
@@ -100258,6 +100619,30 @@ function gml_Object_obj_controller_Create_0(_inst, _other) {
   _inst.gmlteam_name = __yy_gml_array_check(_inst.gmlteam_name, 4207176991);
   _inst.gmlteam_name[__yy_gml_array_check_index_set(0)] = ds_map_find_value(_inst.gmlteam[__yy_gml_array_check_index(0, _inst.gmlteam)], "name");
   _inst.gmlteam_name[__yy_gml_array_check_index_set(1)] = ds_map_find_value(_inst.gmlteam[__yy_gml_array_check_index(1, _inst.gmlteam)], "name");
+  var hsCareerState = yyInst(_inst, _other, YYASSET_REF(0x00000062));
+  if (hsCareerState.gmlhsCareerPending && hsCareerState.gmlhsLiveMatchPending) {
+    var hsSchoolTeamName = hsCareerState.gmlhsSchool === "Hampshire High" ?
+      "Hampshire Hawks" : "Lavticit Lions";
+    var hsRivalTeamName = hsGetOpponentName(hsCareerState);
+    var hsSchoolTla = hsCareerState.gmlhsSchool === "Hampshire High" ? "HAW" : "LIO";
+    var hsRivalTla = hsCareerState.gmlhsSchool === "Hampshire High" ? "LIO" : "HAW";
+    var hsOpponentIndex = !yyGetBool(_inst.gmlhuman_team) ? 1 : 0;
+    _inst.gmlteam[__yy_gml_array_check_index_set(_inst.gmlhuman_team)] =
+      hsCreateMatchTeam(
+        _inst.gmlteam[__yy_gml_array_check_index(_inst.gmlhuman_team, _inst.gmlteam)],
+        hsSchoolTeamName,
+        hsSchoolTla
+      );
+    _inst.gmlteam[__yy_gml_array_check_index_set(hsOpponentIndex)] =
+      hsCreateMatchTeam(
+        _inst.gmlteam[__yy_gml_array_check_index(hsOpponentIndex, _inst.gmlteam)],
+        hsRivalTeamName,
+        hsRivalTla
+      );
+    _inst.gmlteam_name[__yy_gml_array_check_index_set(_inst.gmlhuman_team)] = hsSchoolTeamName;
+    _inst.gmlteam_name[__yy_gml_array_check_index_set(hsOpponentIndex)] = hsRivalTeamName;
+    hsApplySchoolUniforms(_inst, _other, hsCareerState, _inst.gmlhuman_team);
+  }
   _inst.gmlteam_score = __yy_gml_array_check(_inst.gmlteam_score, 4137727317);
   _inst.gmlteam_score[__yy_gml_array_check_index_set(0)] = 0;
   _inst.gmlteam_score[__yy_gml_array_check_index_set(1)] = 0;
@@ -100288,7 +100673,8 @@ function gml_Object_obj_controller_Create_0(_inst, _other) {
     }
   } else {
     {
-      if (yyGetBool(gml_Script_s_is_co_mode(_inst, _other))) {
+      if (!yyGetBool(hsCareerState.gmlhsCareerPending && hsCareerState.gmlhsLiveMatchPending) &&
+          yyGetBool(gml_Script_s_is_co_mode(_inst, _other))) {
         {
           _inst.gmlteam_conf_tag[__yy_gml_array_check_index_set(0)] = gml_Script_s_get_string_conf_tag(_inst, _other, _inst.gmlteam[__yy_gml_array_check_index(0, _inst.gmlteam)], _inst.gmlteam[__yy_gml_array_check_index(1, _inst.gmlteam)]);
           _inst.gmlteam_conf_tag[__yy_gml_array_check_index_set(1)] = gml_Script_s_get_string_conf_tag(_inst, _other, _inst.gmlteam[__yy_gml_array_check_index(1, _inst.gmlteam)], _inst.gmlteam[__yy_gml_array_check_index(0, _inst.gmlteam)]);
@@ -101132,7 +101518,34 @@ function gml_Object_obj_player_Step_0(_inst, _other) {
     _inst.gmlmy_route_alpha = 0;
   }
   if (yyGetBool(_inst.gmloffense)) {
-    gml_Script_s_check_human_control(_inst, _other);
+    var hsCareer = yyInst(_inst, _other, YYASSET_REF(0x00000062));
+    var hsBall = yyInst(_inst, _other, gmlball);
+    var rbCareerMode = hsCareer.gmlhsPlayerPosition === "RB" &&
+      (hsCareer.gmlhsLiveMatchPending || hsCareer.gmlhsCareerComplete);
+    if (rbCareerMode && _inst.gmlposition === 1 &&
+        hsBall.gmlholder === _inst.id && hsBall.gmlstate === 1) {
+      var hsRunningBack = -4;
+      var hsPlayers = GetWithArray(YYASSET_REF(0x0000006c));
+      for (var hsPlayerId in hsPlayers) {
+        if (!hsPlayers.hasOwnProperty(hsPlayerId)) continue;
+        var hsPlayer = hsPlayers[hsPlayerId];
+        if (hsPlayer.gmloffense && hsPlayer.gmlposition === 2) {
+          hsRunningBack = hsPlayer.id;
+          break;
+        }
+      }
+      if (hsRunningBack !== -4) {
+        hsBall.gmlstate = 19;
+        yyInst(_inst, _other, YYASSET_REF(0x00000069)).gmlplay_start =
+          g_pBuiltIn.get_current_time();
+        yyInst(_inst, _other, YYASSET_REF(0x00000069)).gmlrunning_play = true;
+        gml_Script_s_sound_throw(_inst, _other);
+      } else {
+        gml_Script_s_check_human_control(_inst, _other);
+      }
+    } else {
+      gml_Script_s_check_human_control(_inst, _other);
+    }
   }
   gml_Script_s_get_destination(_inst, _other);
   gml_Script_s_check_tackling(_inst, _other);
@@ -103659,7 +104072,8 @@ function gml_Object_obj_details_Create_0(_inst, _other) {
   gml_Script_slog(_inst, _other, yyfplus("obj_master.face_x = ", __yy_gml_errCheck(string(yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlmyface_x))));
   gml_Script_slog(_inst, _other, yyfplus("obj_master.face_y = ", __yy_gml_errCheck(string(yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlmyface_y))));
   gml_Script_s_refresh_gamepads(_inst, _other);
-  if (yyGetBool(gml_Script_s_is_co_mode(_inst, _other))) {
+  if (yyGetBool(gml_Script_s_is_co_mode(_inst, _other)) &&
+      !yyGetBool(yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlhsCareerPending)) {
     {
       gml_Script_s_college_details_init(_inst, _other);
     }
@@ -104507,7 +104921,10 @@ function gml_Object_obj_viewhires_Create_0(_inst, _other) {
 function gml_Object_obj_home_Create_0(_inst, _other) {
   gml_Script_slog(_inst, _other, "------> Create: obj_home");
   gml_Script_s_update_game_title(_inst, _other);
-  gml_Script_s_competitions_status_update(_inst, _other);
+  var hsHomeState = yyInst(_inst, _other, YYASSET_REF(0x00000062));
+  if (!hsHomeState.gmlhsCareerPending || !hsHomeState.gmlhsSeasonActive) {
+    gml_Script_s_competitions_status_update(_inst, _other);
+  }
   gml_Script__poki_gameplay_start(_inst, _other);
   var ___sw2100___ = yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlretrobowlwinner;
   var ___swc2101___ = -1;
@@ -104607,8 +105024,10 @@ function gml_Object_obj_home_Create_0(_inst, _other) {
       global.gmlg_savedelay = g_pBuiltIn.get_current_time();
     }
   }
-  gml_Script_s_check_intro_rm_home(_inst, _other);
-  gml_Script_s_check_for_news(_inst, _other);
+  if (!yyGetBool(yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlhsCareerPending)) {
+    gml_Script_s_check_intro_rm_home(_inst, _other);
+    gml_Script_s_check_for_news(_inst, _other);
+  }
   if (yyfgreaterequal(gml_Script_s_get_morale(_inst, _other), 100)) {
     gml_Script_s_complete_achievement(_inst, _other, "ACH_MORALE100");
   }
@@ -104633,6 +105052,11 @@ function gml_Object_obj_home_Create_0(_inst, _other) {
     }
   }
   gml_Script_s_co_debug_access(_inst, _other);
+  hsConfigureCareerHome(
+    _inst,
+    _other,
+    yyInst(_inst, _other, YYASSET_REF(0x00000062))
+  );
 }
 function gml_Script____struct___206_gml_Object_obj_home_Create_0(_inst, _other) {
   if (_inst.__yyIsGMLObject) {
@@ -105737,6 +106161,10 @@ function gml_Object_obj_playoffs2_PreCreate_0(_inst, _other) {
   _inst.gmlshow_afc = true;
 }
 function gml_Object_obj_prematch_Create_0(_inst, _other) {
+  var hsCareerState = yyInst(_inst, _other, YYASSET_REF(0x00000062));
+  if (hsCareerState.gmlhsCareerPending && hsCareerState.gmlhsLiveMatchPending) {
+    hsCareerState.gmlintro = 0;
+  }
   if (yyfgreater(yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlintro, 0)) {
     {
       gml_Script_s_check_intro(_inst, _other);
@@ -105754,7 +106182,25 @@ function gml_Object_obj_prematch_Create_0(_inst, _other) {
   }
   _inst.gmlteam0 = yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlteam[__yy_gml_array_check_index(0, yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlteam)];
   _inst.gmlteam1 = yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlteam[__yy_gml_array_check_index(1, yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlteam)];
-  _inst.gmlstr_type = gml_Script_s_get_fix_type_string_by_values(_inst, _other, _inst.gmlteam0, _inst.gmlteam1);
+  if (hsCareerState.gmlhsCareerPending && hsCareerState.gmlhsLiveMatchPending) {
+    var schoolName = hsCareerState.gmlhsSchool === "Hampshire High" ?
+      "Hampshire Hawks" : "Lavticit Lions";
+    var rivalName = hsGetOpponentName(hsCareerState);
+    var schoolTla = hsCareerState.gmlhsSchool === "Hampshire High" ? "HAW" : "LIO";
+    var rivalTla = hsCareerState.gmlhsSchool === "Hampshire High" ? "LIO" : "HAW";
+    if (hsCareerState.gmlplayerteamindex === 0) {
+      _inst.gmlteam0 = hsCreateMatchTeam(_inst.gmlteam0, schoolName, schoolTla);
+      _inst.gmlteam1 = hsCreateMatchTeam(_inst.gmlteam1, rivalName, rivalTla);
+    } else {
+      _inst.gmlteam0 = hsCreateMatchTeam(_inst.gmlteam0, rivalName, rivalTla);
+      _inst.gmlteam1 = hsCreateMatchTeam(_inst.gmlteam1, schoolName, schoolTla);
+    }
+  }
+  if (hsCareerState.gmlhsCareerPending && hsCareerState.gmlhsLiveMatchPending) {
+    _inst.gmlstr_type = "";
+  } else {
+    _inst.gmlstr_type = gml_Script_s_get_fix_type_string_by_values(_inst, _other, _inst.gmlteam0, _inst.gmlteam1);
+  }
   var ___sw2138___ = yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlforce_uniform_sel1;
   var ___swc2139___ = -1;
   if (yyCompareVal(___sw2138___, 0, g_GMLMathEpsilon, false) == 0) {
@@ -105927,6 +106373,11 @@ function gml_Object_obj_prematch_Create_0(_inst, _other) {
         gml_Script_s_blackwhite_colour_hack(__yy__v2376, _inst, __yy__v2376.gmlcol_stripe_away);
       }
     }
+  }
+  if (hsCareerState.gmlhsCareerPending && hsCareerState.gmlhsLiveMatchPending) {
+    hsApplySchoolUniforms(_inst, _other, hsCareerState, hsCareerState.gmlplayerteamindex);
+    hsCopyUniformColorsToPreview(hsCareerState, yyInst(_inst, _other, 100394), "home");
+    hsCopyUniformColorsToPreview(hsCareerState, yyInst(_inst, _other, 100393), "away");
   }
   yyInst(_inst, _other, 100395).gmltitle = yyfplus(yyfplus(__yy_gml_errCheck(gml_Script_s_str(_inst, _other, "ui_Ball")), " "), __yy_gml_errCheck(string(yyfplus(__yy_gml_errCheck(yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlop_ball), 1))));
   yyInst(_inst, _other, 100397).gmlimage_num = yyInst(_inst, _other, YYASSET_REF(0x00000062)).gmlop_ball;
@@ -108913,6 +109364,7 @@ function gml_RoomCC_rm_title_0_PreCreate(_inst, _other) {
 }
 function gml_Room_rm_details_Create(_inst, _other) {
   layer_background_blend(layer_background_get_id(layer_get_id("Background")), global.gmlc_background);
+  hsSetupCharacterControls(_inst, _other);
 }
 function gml_RoomCC_rm_details_0_PreCreate(_inst, _other) {
   _inst.gmltext = gml_Script_s_str(_inst, _inst, "ui_NewCareer");
@@ -110374,15 +110826,22 @@ function gml_Room_rm_post_match_Create(_inst, _other) {
   layer_background_blend(layer_background_get_id(layer_get_id("Background")), global.gmlc_background);
 }
 function gml_RoomCC_rm_post_match_0_PreCreate(_inst, _other) {
-  _inst.gmltext = gml_Script_s_str(_inst, _inst, "ui_Continue");
+  var hsState = yyInst(_inst, _other, YYASSET_REF(0x00000062));
+  _inst.gmltext = hsState.gmlhsCareerPending && hsState.gmlhsSeasonActive ?
+    "CONTINUE SEASON" : gml_Script_s_str(_inst, _inst, "ui_Continue");
   _inst.gmlonClickAction = kgml_Script_s_do_postmatch_dilemma;
 }
 function gml_RoomCC_rm_post_match_1_PreCreate(_inst, _other) {
   _inst.gmlonClickAction = kgml_Script_btn_click_League;
-  _inst.gmltext = gml_Script_s_str(_inst, _inst, "ui_Results");
+  var hsState = yyInst(_inst, _other, YYASSET_REF(0x00000062));
+  _inst.gmltext = hsState.gmlhsCareerPending && hsState.gmlhsSeasonActive ?
+    "SEASON" : gml_Script_s_str(_inst, _inst, "ui_Results");
 }
 function gml_RoomCC_rm_post_match_2_PreCreate(_inst, _other) {
-  _inst.gmltext = gml_Script_s_str(_inst, _inst, "ui_Result");
+  var hsState = yyInst(_inst, _other, YYASSET_REF(0x00000062));
+  _inst.gmltext = hsState.gmlhsCareerPending && hsState.gmlhsSeasonActive ?
+    "HIGH SCHOOL GAME " + Math.min(6, hsState.gmlhsSeasonWeek + 1) + " FINAL" :
+    gml_Script_s_str(_inst, _inst, "ui_Result");
 }
 function gml_RoomCC_rm_post_match_4_PreCreate(_inst, _other) {
   _inst.gmltext = gml_Script_s_get_credit(_inst, _inst);

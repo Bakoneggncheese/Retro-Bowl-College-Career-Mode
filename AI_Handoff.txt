@@ -13,10 +13,16 @@ Launch instructions
 
 High-school player career
 - On a new Player career, the native details screen is used for player creation before the season; Coach selection is unchanged.
-- Pressing Continue starts six native GameMaker high-school games. Each game has three drives and repeatable Pass/Run choices on each play, with downs, touchdowns, scores, and a season record.
-- After week six, two offers are selected from the game's college team list. Accepting one continues the native QB career with that college team.
-- **Existing Saves** returns through the native details back action. It does not clear or rewrite save data.
-- Create a new save and choose Player to test the prelude again.
+- School, QB/RB position, and 1-to-3-star rating controls are integrated into the native character-details screen.
+- The Player home screen replaces the college division panel with a custom season summary and opens a native high-school schedule popup; the stock League screen is not shown during the high-school season.
+- Player careers start at the beginning of the season and play six real on-field matches, skipping any bye weeks while advancing the schedule. School identity and uniform colors are customized for the matches, and the introductory tutorial is skipped.
+- After the sixth match, the native recruiting popup presents two college offers and the college-entry rating. The offer selected determines the recruited rating and college attributes.
+- Offer choices show the college-entry rating after a tiered star reduction based on the high-school rating. The chosen value sets the created player's initial college attributes.
+- RB setup keeps the created player on the RB roster entry rather than the QB entry, and offensive plays in the RB career hand off to the RB using normal running controls. Route grading, coach benching, and autosim are not implemented.
+- Player-mode setup does not override the stock button fill color.
+- `index.html` displays uncaught runtime errors while allowing the game's own global error handler to run.
+- Missing optional locale override files are skipped if their text-file handle cannot be opened, preserving the base-language strings.
+- Create a new save and choose Player to test the full high-school season and college handoff.
 
 What was cleaned up
 - Duplicate archives and screenshots were moved into the archive/ and screenshots/ folders to keep the root directory tidy.

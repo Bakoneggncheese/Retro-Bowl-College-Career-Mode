@@ -1,8 +1,8 @@
 # Retro Bowl College Career Mode
 
-This project includes the compiled Retro Bowl College browser game and a high-school season integrated into its native GameMaker UI. On a new Player career, use the native player setup screen to enter your name and choose your appearance, then play six high-school games. Each game has three drives; choose pass or run on every play, convert first downs, score touchdowns, and earn a recruiting grade. At the end, choose between two college offers to begin your native QB career at that school. The Coach path and existing saves remain in the original game.
+This project includes the compiled Retro Bowl College browser game and a high-school career integrated into its native GameMaker UI. Start a new Player career to create a character, choose Hampshire High or Lavticit High, select QB or RB, and choose a starting rating from 1 to 3 stars. Play a six-game high-school season using the regular on-field gameplay, custom school identities and uniforms, and a Player-specific season screen. After the season, choose between two college offers; the selected offer determines the reduced college-entry rating and initial college attributes. The Coach path remains unchanged.
 
-The season runs through the game's in-canvas message system; no browser overlay or separate career storage is used. Choose **Existing Saves** before starting the season to return to the game's save screen without modifying a save.
+The career flow uses the game's native UI and in-canvas message system; no browser overlay or separate career storage is used. Player mode skips the introductory tutorial and displays high-school opponents and schedule details instead of the college league during the season. In an RB career, offensive plays hand the ball to the selected player so the normal arrow-key running controls work.
 
 Have Fun!
 
@@ -16,6 +16,6 @@ python3 -m http.server 8000
 
 Then open `http://localhost:8000/` in your browser. Opening `index.html` directly may leave the game blank because the game loads its assets over HTTP.
 
-## Testing the career prelude
+## Testing the Player career
 
-Start a new save, choose Player, create your player, then press Continue to begin the high-school season. Existing saves bypass the first-run season.
+Start a new save, choose Player, create your player, choose a high school, position, and starting rating, then play six native field matches. The post-season screen presents college offers and the college-entry rating.

@@ -11,6 +11,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta charset="utf-8" />
+    <script>
+        (function () {
+            var reported = false;
+            function reportError(event, error) {
+                if (reported) return;
+                reported = true;
+                var message = event.message || (error && error.message) ||
+                    (error ? String(error) : "The browser did not provide an error message.");
+                var location = event.filename ?
+                    "\nLocation: " + event.filename + ":" + event.lineno + ":" + event.colno : "";
+                var stack = error && error.stack ? "\n\n" + error.stack.slice(0, 1800) : "";
+                window.setTimeout(function () {
+                    alert("The game reported an error (" + event.type + "):\n" +
+                        message + location + stack);
+                }, 0);
+            }
+            window.addEventListener("error", function (event) {
+                reportError(event, event.error);
+            });
+            window.addEventListener("unhandledrejection", function (event) {
+                reportError(event, event.reason);
+            });
+        })();
+    </script>
 	
 	<!-- Added KeyRedirect.js -->
     <script src="KeyRedirect.js" defer></script>
@@ -123,7 +147,7 @@
 
     <!-- Run the game code -->
     <script src="poki-sdk.js"></script>
-    <script src="html5game/RetroBowl.js"></script>
+    <script src="html5game/RetroBowl.js?v=player-career-setup-20261111-39"></script>
     <script>window.GameMaker_Init();</script>
 
     <!-- Builtin injector for injecting runner path -->
